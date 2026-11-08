@@ -1,0 +1,14 @@
+.DS_Store
+.venv/
+.claude/
+__pycache__/
+# data and intermediate outputs (not published)
+*.docx
+*.xlsx
+*.pdf
+模擬醫療記錄單30份_手寫掃描檔/
+ocr_raw/
+work/
+output/
+template/
+ocr_viewer.html

@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<title>欄位校正</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:14px system-ui,-apple-system,"PingFang TC",sans-serif;display:flex;height:100vh;color:#222}
+#side{width:290px;flex:none;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fafafa}
+#side h1{font-size:15px;margin:0;padding:10px;border-bottom:1px solid #ddd}
+#overall{padding:6px 10px;font-size:12px;color:#555;border-bottom:1px solid #ddd}
+#overall .bar{height:6px;background:#ddd;border-radius:3px;margin-top:4px;overflow:hidden}
+#overall .bar i{display:block;height:100%;background:#2a2}
+#slots{flex:1;overflow:auto}
+.s{padding:6px 10px;border-bottom:1px solid #eee;cursor:pointer;display:flex;align-items:center;gap:6px}
+.s:hover{background:#eef}.s.sel{background:#dde6ff}
+.s .n{margin-left:auto;font-size:12px;color:#666;white-space:nowrap}
+.s .fl{background:#e33;color:#fff;border-radius:8px;padding:0 6px;font-size:11px}
+.s .done{color:#2a2;font-weight:bold}
+#sideBtns{padding:8px;border-top:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px}
+#sideBtns input[type=file]{display:none}
+#sideBtns label{border:1px solid #888;border-radius:4px;padding:1px 6px;cursor:pointer;background:#fff;font-size:13px}
+button{font:inherit;cursor:pointer}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#bar{padding:8px 12px;border-bottom:1px solid #ddd;display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#fff}
+#bar h2{font-size:16px;margin:0}
+#rows{flex:1;overflow:auto;padding:8px 12px;background:#f3f3f3}
+.r{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;background:#fff;border:1px solid #ddd;border-radius:6px;padding:6px 8px;margin-bottom:6px}
+.r.focus{border-color:#2563eb;box-shadow:0 0 0 2px #2563eb55}
+.r.ok{background:#f2fbf2}
+.r .pg{width:44px;flex:none;text-align:center;font-weight:bold;color:#2563eb;cursor:pointer;padding-top:4px}
+.r .pg small{display:block;font-weight:normal;color:#888;font-size:11px}
+.r .img{position:relative;flex:none;max-width:52%;line-height:0;border:1px solid #eee}
+.r .img img{display:block;width:100%;height:auto}
+.r .ed{flex:1 1 200px;min-width:200px;display:flex;flex-direction:column;gap:4px}
+.r .ed input[type=text]{font-size:18px;padding:3px 6px;width:100%;border:1px solid #bbb;border-radius:4px}
+.r .ed textarea{font-size:15px;padding:4px 6px;width:100%;height:96px;border:1px solid #bbb;border-radius:4px}
+.r .meta{font-size:12px;color:#666;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.badge{border-radius:4px;padding:0 5px;font-size:11px;background:#fde2e2;color:#a00}
+.badge.empty{background:#eee;color:#666}.badge.fixed{background:#dbeafe;color:#1d4ed8}
+.alt{border:1px dashed #999;border-radius:4px;padding:0 6px;cursor:pointer;background:#fffbe6}
+.alt:hover{background:#ffe9a8}
+.ck{flex:none;width:34px;height:34px;border-radius:50%;border:2px solid #bbb;background:#fff;font-size:18px;color:#bbb}
+.r.ok .ck{border-color:#2a2;background:#2a2;color:#fff}
+.opt{position:absolute;border:2px solid #999;cursor:pointer;background:rgba(0,0,0,.02)}
+.opt.on{border-color:#16a34a;background:rgba(22,163,74,.25)}
+.opt.unsure{outline:2px dashed #f59e0b;outline-offset:1px}
+.opts{display:flex;flex-wrap:wrap;gap:4px}
+.r.cb{flex-wrap:wrap}
+.r.cb .img{max-width:calc(100% - 110px)}
+.r.cb .ck{order:2;margin-left:auto}
+.r.cb .ed{order:3;flex:1 1 100%;padding-left:54px}
+.opts button{white-space:nowrap}
+.opts button{border:1px solid #bbb;border-radius:4px;background:#fff;padding:1px 6px;font-size:13px}
+.opts button.on{background:#16a34a;border-color:#16a34a;color:#fff}
+.opts button kbd{font-size:10px;color:#888;margin-right:2px}
+.opts button.on kbd{color:#d1fae5}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:20}
+#modal .box{position:absolute;inset:30px;background:#fff;border-radius:8px;overflow:auto}
+#modal .stage{position:relative;transform-origin:0 0}
+#modal .hl{position:absolute;border:4px solid #f59e0b;background:rgba(245,158,11,.15)}
+#modal .close{position:fixed;top:36px;right:46px;z-index:21;font-size:16px}
+#help{font-size:12px;color:#666}
+</style>
+<div id="side">
+  <h1>欄位校正</h1>
+  <div id="overall"></div>
+  <div id="slots"></div>
+  <div id="sideBtns">
+    <button id="bExport">匯出校正結果</button>
+    <label>匯入<input type="file" id="fImport" accept=".json"></label>
+    <button id="bReset" style="color:#a00">清除</button>
+  </div>
+</div>
+<div id="main">
+  <div id="bar">
+    <h2 id="title">載入中…</h2>
+    <label>排序 <select id="sort"><option value="flag">需檢查優先</option><option value="page">頁碼</option></select></label>
+    <label>顯示 <select id="filter"><option value="all">全部</option><option value="todo">未確認</option><option value="flag">有旗標</option><option value="nonempty">非空白</option></select></label>
+    <label>圖片縮放 <input type="range" id="zoom" min="0.3" max="1.5" step="0.05" value="0.8"></label>
+    <button id="bConfirmClean">確認所有無旗標項</button>
+    <span id="help">Enter 確認並跳下一筆 · Shift+Enter 上一筆 · 勾選欄位按數字鍵切換選項 · 點頁碼看整張</span>
+  </div>
+  <div id="rows"></div>
+</div>
+<div id="modal"><button class="close" id="mClose">關閉 (Esc)</button><div class="box" id="mBox"><div class="stage" id="mStage"><img id="mImg"><div class="hl" id="mHl"></div></div></div></div>
+<script>
+const q = new URLSearchParams(location.search);
+const RESULTS = q.get('results') || '../work/extract/results.json';
+const TEMPLATE = q.get('template') || '../templates/medical_record_1_2.json';
+const ALIGNED = q.get('aligned') || '../work/aligned/';
+const BASE = RESULTS.replace(/[^/]*$/, '');
+const $ = id => document.getElementById(id);
+let T, R, SLOTS = [], cur = 0, focusIdx = 0, ST = {corrections: {}};
+let zoom = 0.8;
+const STORE = () => `review:${T.form_id}:${RESULTS}`;
+const FLAG_TXT = {variants_disagree:'兩版不一致', range:'超出範圍', pattern:'格式不符', not_number:'非數字', digits_count:'位數不對',
+  auto_decimal:'自動補小數點', checkbox_unsure:'勾選不確定', multiple_checked:'單選卻多勾', required_empty:'必填未填',
+  not_in_dictionary:'不在字典', year_digits:'年份位數', extra_numbers:'多餘數字', low_conf:'信心低'};
+const LOW_CONF = 0.9;
+
+Promise.all([fetch(TEMPLATE).then(r=>r.json()), fetch(RESULTS).then(r=>r.json())]).then(([t, r]) => {
+  T = t; R = r;
+  buildSlots();
+  const saved = localStorage.getItem(STORE()); if(saved) ST = JSON.parse(saved);
+  renderSide(); show(0);
+}).catch(e => { $('title').textContent = '載入失敗：' + e + '（請用 python3 -m http.server 從專案根目錄開啟）'; });
+
+function pageKeys(){ return Object.keys(R.pages).sort((a,b)=>+a - +b); }
+function buildSlots(){
+  for(const f of T.fields){
+    if(f.type === 'drawing') continue;
+    const isCb = f.type.startsWith('checkbox');
+    SLOTS.push({id: f.id, field: f, kind: isCb ? 'checkbox' : (f.type==='paragraph' ? 'paragraph' : 'text'), label: f.label,
+      get: k => R.pages[k].fields[f.id]});
+    const ots = f.other_text ? (Array.isArray(f.other_text) ? f.other_text : [f.other_text]) : [];
+    for(const o of ots){
+      const ol = (f.options.find(x=>x.value===o.option)||{}).label || o.option;
+      SLOTS.push({id: `${f.id}.other.${o.option}`, field: f, other: o.option, kind: 'text', label: `${f.label}「${ol}」補充文字`,
+        get: k => (R.pages[k].fields[f.id].other||{})[o.option] || {}});
+    }
+  }
+}
+// ---------- state helpers
+function corr(slot, k){ return (ST.corrections[slot.id]||{})[k]; }
+function setCorr(slot, k, patch){
+  const c = (ST.corrections[slot.id] = ST.corrections[slot.id] || {});
+  c[k] = Object.assign({}, c[k], patch);
+  localStorage.setItem(STORE(), JSON.stringify(ST));
+}
+function valueOf(slot, k){ const c = corr(slot,k); return c && 'value' in c ? c.value : (slot.get(k).value ?? (slot.kind==='checkbox' && slot.field.type==='checkbox_multi' ? [] : '')); }
+function flagsOf(slot, k){
+  const e = slot.get(k); const f = [...(e.flags||[])];
+  if(slot.kind !== 'checkbox' && !e.empty && e.conf != null && e.conf < LOW_CONF) f.push('low_conf');
+  // for a single checkbox the box is checked only when its group's own decision says so; an "other" text with ink but no tick is suspicious
+  if(slot.other){ const g = slot.get(k), parent = R.pages[k].fields[slot.field.id];
+    const checked = [].concat(valueOf(SLOTS.find(s=>s.id===slot.field.id), k)).includes(slot.other);
+    if(!g.empty && !checked) f.push('text_without_tick'); }
+  return f;
+}
+FLAG_TXT.text_without_tick = '有文字但沒勾';
+function confirmed(slot, k){ return !!(corr(slot,k)||{}).confirmed; }
+function needsCheck(slot, k){ return flagsOf(slot,k).length > 0; }
+
+// ---------- sidebar
+function renderSide(){
+  const ks = pageKeys(); let tot = 0, done = 0;
+  $('slots').innerHTML = '';
+  SLOTS.forEach((s,i) => {
+    const c = ks.filter(k=>confirmed(s,k)).length, fl = ks.filter(k=>needsCheck(s,k) && !confirmed(s,k)).length;
+    tot += ks.length; done += c;
+    const d = document.createElement('div'); d.className = 's' + (i===cur?' sel':'');
+    d.innerHTML = `<span>${esc(s.label)}</span><span class="n">${fl?`<span class="fl">${fl}</span> `:''}${c===ks.length?'<span class="done">✓</span>':c+'/'+ks.length}</span>`;
+    d.onclick = () => show(i);
+    $('slots').appendChild(d);
+  });
+  $('overall').innerHTML = `已確認 ${done} / ${tot}（${Math.round(done/tot*100)}%）<div class="bar"><i style="width:${done/tot*100}%"></i></div>`;
+}
+function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ---------- rows
+function orderedKeys(slot){
+  let ks = pageKeys();
+  const flt = $('filter').value;
+  if(flt==='todo') ks = ks.filter(k=>!confirmed(slot,k));
+  if(flt==='flag') ks = ks.filter(k=>needsCheck(slot,k));
+  if(flt==='nonempty') ks = ks.filter(k=>!slot.get(k).empty);
+  if($('sort').value==='flag') ks.sort((a,b)=> (confirmed(slot,a)-confirmed(slot,b)) || (needsCheck(slot,b)-needsCheck(slot,a)) || (+a - +b));
+  return ks;
+}
+let ROWKEYS = [];
+function show(i){
+  cur = i; focusIdx = 0;
+  const s = SLOTS[i];
+  $('title').textContent = s.label;
+  renderRows(); renderSide();
+}
+function renderRows(){
+  const s = SLOTS[cur];
+  ROWKEYS = orderedKeys(s);
+  const box = $('rows'); box.innerHTML = '';
+  ROWKEYS.forEach((k, idx) => box.appendChild(row(s, k, idx)));
+  focusRow(Math.min(focusIdx, ROWKEYS.length-1), false);
+}
+function row(s, k, idx){
+  const e = s.get(k), d = document.createElement('div');
+  d.className = 'r' + (s.kind==='checkbox'?' cb':'') + (confirmed(s,k)?' ok':''); d.dataset.idx = idx;
+  const flags = flagsOf(s,k);
+  const edited = corr(s,k) && 'value' in corr(s,k);
+  let ed = '';
+  if(s.kind === 'checkbox'){
+    const v = [].concat(valueOf(s,k));
+    ed = `<div class="opts">${s.field.options.map((o,j)=>`<button data-v="${esc(o.value)}" class="${v.includes(o.value)?'on':''}" title="分數 ${e.scores[o.value]}"><kbd>${j<9?j+1:''}</kbd>${esc(o.label)}</button>`).join('')}</div>`;
+  } else if(s.kind === 'paragraph'){
+    ed = `<textarea>${esc(valueOf(s,k))}</textarea>`;
+  } else {
+    ed = `<input type="text" value="${esc(valueOf(s,k))}">`;
+  }
+  const alts = s.kind==='checkbox' ? [] : Object.entries(e.variants||{}).filter(([n,x]) => x.value !== valueOf(s,k) && x.value);
+  d.innerHTML = `
+    <div class="pg">${+k}<small>頁</small></div>
+    <div class="img"><img src="${BASE + e.crop}"></div>
+    <div class="ed">${ed}
+      <div class="meta">
+        ${e.empty?'<span class="badge empty">空白</span>':''}
+        ${flags.map(f=>`<span class="badge">${f.startsWith('dict:') ? '字典校正（原：'+esc(f.slice(5))+'）' : (FLAG_TXT[f]||f)}</span>`).join('')}
+        ${edited?'<span class="badge fixed">已修改</span>':''}
+        ${s.kind!=='checkbox' && e.conf!=null && !e.empty ? `<span>信心 ${e.conf.toFixed(2)}</span>`:''}
+        ${alts.map(([n,x])=>`<span class="alt" data-alt="${esc(x.value)}" title="${n==='raw'?'原圖':'去印刷字'}版 OCR，點一下採用">${esc(x.value)}</span>`).join('')}
+        ${s.kind!=='checkbox' && e.raw && e.raw!==e.value ? `<span title="OCR 原始文字">原文：${esc(e.raw)}</span>`:''}
+      </div>
+    </div>
+    <button class="ck" title="確認 (Enter)">✓</button>`;
+  const img = d.querySelector('.img img');
+  img.onload = () => { img.parentNode.style.width = img.naturalWidth*zoom + 'px'; if(s.kind==='checkbox') requestAnimationFrame(() => overlay(d, s, k)); };
+  d.querySelector('.pg').onclick = () => openPage(s, k);
+  d.querySelector('.ck').onclick = () => { setCorr(s,k,{confirmed: !confirmed(s,k)}); refreshRow(idx); };
+  d.onclick = ev => { if(!ev.target.closest('.ck')) focusRow(idx, false); };
+  const inp = d.querySelector('input,textarea');
+  if(inp){
+    inp.oninput = () => setCorr(s,k,{value: inp.value, confirmed: true});
+    inp.onblur = () => refreshRow(idx, true);
+  }
+  d.querySelectorAll('.opts button').forEach(b => b.onclick = () => toggleOpt(s,k,b.dataset.v,idx));
+  d.querySelectorAll('.alt').forEach(a => a.onclick = () => { setCorr(s,k,{value:a.dataset.alt, confirmed:true}); refreshRow(idx); });
+  return d;
+}
+function overlay(d, s, k){
+  const e = s.get(k), o0 = e.crop_origin, v = [].concat(valueOf(s,k)), box = d.querySelector('.img');
+  const im = box.querySelector('img'), zoom = im.getBoundingClientRect().width / im.naturalWidth;  // actual rendered scale
+  box.querySelectorAll('.opt').forEach(x=>x.remove());
+  s.field.options.forEach(o => {
+    const el = document.createElement('div'); const sc = e.scores[o.value];
+    el.className = 'opt' + (v.includes(o.value)?' on':'') + (sc>=0.02 && sc<0.07?' unsure':'');
+    const pad = 6;
+    el.style.cssText = `left:${(o.bbox[0]-o0[0]-pad)*zoom}px;top:${(o.bbox[1]-o0[1]-pad)*zoom}px;width:${(o.bbox[2]-o.bbox[0]+2*pad)*zoom}px;height:${(o.bbox[3]-o.bbox[1]+2*pad)*zoom}px`;
+    el.title = `${o.label}  分數 ${sc}`;
+    el.onclick = ev => { ev.stopPropagation(); toggleOpt(s,k,o.value,+d.dataset.idx); };
+    box.appendChild(el);
+  });
+}
+function toggleOpt(s, k, v, idx){
+  let cur = valueOf(s,k);
+  if(s.field.type==='checkbox_single') cur = (cur===v ? '' : v);
+  else { cur = [].concat(cur); cur = cur.includes(v) ? cur.filter(x=>x!==v) : [...cur, v]; cur = s.field.options.map(o=>o.value).filter(x=>cur.includes(x)); }
+  setCorr(s,k,{value: cur, confirmed: true}); refreshRow(idx);
+}
+function refreshRow(idx, keepFocus){
+  const old = $('rows').querySelector(`.r[data-idx="${idx}"]`); if(!old) return;
+  const n = row(SLOTS[cur], ROWKEYS[idx], idx);
+  if(old.classList.contains('focus')) n.classList.add('focus');
+  old.replaceWith(n); renderSide();
+}
+function focusRow(idx, focusInput=true){
+  if(idx<0 || idx>=ROWKEYS.length) return;
+  focusIdx = idx;
+  $('rows').querySelectorAll('.r.focus').forEach(x=>x.classList.remove('focus'));
+  const el = $('rows').querySelector(`.r[data-idx="${idx}"]`); if(!el) return;
+  el.classList.add('focus'); el.scrollIntoView({block:'nearest'});
+  if(focusInput){ const inp = el.querySelector('input,textarea'); if(inp){ inp.focus(); inp.select && inp.tagName==='INPUT' && inp.select(); } else el.focus?.(); }
+}
+document.addEventListener('keydown', ev => {
+  if($('modal').style.display==='block'){ if(ev.key==='Escape') closeModal(); return; }
+  const s = SLOTS[cur]; if(!s) return;
+  if(ev.isComposing || ev.keyCode === 229) return;  // IME (注音/倉頡) is committing text: leave Enter alone
+  const inTextarea = ev.target.tagName==='TEXTAREA';
+  if(ev.key==='Enter' && !(inTextarea && !ev.metaKey && !ev.ctrlKey)){
+    ev.preventDefault();
+    if(ev.shiftKey){ focusRow(focusIdx-1); return; }
+    const k = ROWKEYS[focusIdx]; setCorr(s,k,{confirmed:true}); refreshRow(focusIdx);
+    focusRow(focusIdx+1); return;
+  }
+  if(ev.target.tagName==='INPUT' || inTextarea) return;
+  if(s.kind==='checkbox' && /^[1-9]$/.test(ev.key)){
+    const o = s.field.options[+ev.key-1]; if(o) toggleOpt(s, ROWKEYS[focusIdx], o.value, focusIdx);
+  }
+  if(ev.key==='ArrowDown'){ ev.preventDefault(); focusRow(focusIdx+1); }
+  if(ev.key==='ArrowUp'){ ev.preventDefault(); focusRow(focusIdx-1); }
+});
+// ---------- full page modal
+function openPage(s, k){
+  const f = s.field;
+  let b = f.bbox;
+  if(s.other){ const ots = Array.isArray(f.other_text)?f.other_text:[f.other_text]; b = ots.find(o=>o.option===s.other).bbox; }
+  if(!b && f.options){ const xs=f.options.map(o=>o.bbox); b=[Math.min(...xs.map(x=>x[0])),Math.min(...xs.map(x=>x[1])),Math.max(...xs.map(x=>x[2])),Math.max(...xs.map(x=>x[3]))]; }
+  $('mImg').src = ALIGNED + R.pages[k].page;
+  const z = 0.75; $('mStage').style.transform = `scale(${z})`;
+  const hl = $('mHl'); hl.style.cssText = `left:${b[0]-8}px;top:${b[1]-8}px;width:${b[2]-b[0]+16}px;height:${b[3]-b[1]+16}px`;
+  $('modal').style.display = 'block';
+  $('mImg').onload = () => $('mBox').scrollTo({top: b[1]*z - 200, left: Math.max(0, b[0]*z - 300)});
+}
+function closeModal(){ $('modal').style.display='none'; }
+$('mClose').onclick = closeModal;
+$('modal').onclick = ev => { if(ev.target.id==='modal') closeModal(); };
+// ---------- toolbar
+$('sort').onchange = $('filter').onchange = () => { focusIdx = 0; renderRows(); };
+$('zoom').oninput = e => { zoom = +e.target.value; renderRows(); };
+window.addEventListener('resize', () => { clearTimeout(window._rt); window._rt = setTimeout(renderRows, 200); });
+$('bConfirmClean').onclick = () => {
+  const s = SLOTS[cur]; let n = 0;
+  pageKeys().forEach(k => { if(!needsCheck(s,k) && !confirmed(s,k)){ setCorr(s,k,{confirmed:true}); n++; } });
+  renderRows(); renderSide(); $('help').textContent = `已確認 ${n} 筆無旗標項`;
+};
+$('bExport').onclick = () => {
+  const out = {form_id: T.form_id, results: RESULTS, exported_at: new Date().toISOString(), corrections: ST.corrections};
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], {type:'application/json'}));
+  a.download = `corrections_${T.form_id}.json`; a.click();
+};
+$('fImport').onchange = e => { const r = new FileReader(); r.onload = () => { const j = JSON.parse(r.result); ST.corrections = j.corrections || {}; localStorage.setItem(STORE(), JSON.stringify(ST)); renderSide(); renderRows(); }; r.readAsText(e.target.files[0]); };
+$('bReset').onclick = () => { if(confirm('清除這個瀏覽器裡的所有校正紀錄？（建議先匯出）')){ ST = {corrections:{}}; localStorage.removeItem(STORE()); renderSide(); renderRows(); } };
+</script>
+</html>

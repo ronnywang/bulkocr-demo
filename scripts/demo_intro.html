@@ -1,0 +1,66 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;color:#222;line-height:1.65;background:#fff}
+main{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:#666;margin:0 0 24px}
+h2{font-size:18px;margin:28px 0 8px;border-left:4px solid #1f6feb;padding-left:8px}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:12px 0}
+.step{flex:1 1 150px;border:1px solid #ddd;border-radius:8px;padding:10px 12px;background:#fafbfc;font-size:14px}
+.step b{display:block;font-size:15px;margin-bottom:2px}
+.step .tag{display:inline-block;font-size:12px;border-radius:4px;padding:0 6px;margin-top:4px}
+.gpu{background:#fde7e7;color:#b42318}.cpu{background:#e7f0fd;color:#1f4fb4}.fe{background:#e5f6ea;color:#1b7a3a}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
+td,th{border-bottom:1px solid #eee;padding:6px 8px;text-align:left}
+th{background:#f6f8fa}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+button.go{border:1px solid #1f6feb;background:#fff;color:#1f6feb;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:14px}
+button.go:hover{background:#1f6feb;color:#fff}
+ul{padding-left:20px}
+.note{font-size:13px;color:#777;margin-top:30px}
+</style>
+<main>
+<h1>手寫紙本表單批次整理</h1>
+<p class="sub">已知格式的手寫掃描表單，批次轉成結構化資料表（xlsx），再由人工逐欄校正。這裡用「醫療記錄單」的合成模擬資料展示，共 __N__ 份。</p>
+
+<h2>流程</h2>
+<div class="flow">
+  <div class="step"><b>1. 整頁 OCR</b>PaddleOCR 辨識文字、座標和信心值<br><span class="tag gpu">OCR</span></div>
+  <div class="step"><b>2. 對齊</b>每頁都有、而且只出現一次的印刷字就是錨點，用來把每頁對到參考頁（誤差 &lt; 2px）。所有頁面取中位數，就得到乾淨的空白表單<br><span class="tag cpu">CPU</span></div>
+  <div class="step"><b>3. 模板 JSON</b>AI 起草欄位位置、類型和驗證規則，再由人工在編輯器確認<br><span class="tag fe">純前端</span></div>
+  <div class="step"><b>4. 抽取</b>勾選框：減去空白表單後算墨水比例。文字：裁切欄位後做 OCR，再正規化、驗證並標上旗標<br><span class="tag cpu">CPU</span> <span class="tag gpu">OCR</span></div>
+  <div class="step"><b>5. 逐欄校正</b>一次看所有份數的同一個欄位，有旗標的排前面<br><span class="tag fe">純前端</span></div>
+  <div class="step"><b>6. 匯出 xlsx</b>需要確認的儲存格標黃色，人工修正過的標藍色<br><span class="tag cpu">CPU</span></div>
+</div>
+
+<h2>試用</h2>
+<table>
+<tr><td><button class="go" data-tab="viewer">① 整頁 OCR</button></td><td>原始掃描檔加上 OCR 框。綠、橘、紅代表信心高低，點框可以看辨識出來的文字。</td></tr>
+<tr><td><button class="go" data-tab="editor">② 模板編輯器</button></td><td>空白表單上疊著欄位框，底下半透明的是一份填寫過的範例。可以拖拉框、調整大小，逐欄標記已確認後匯出 JSON。</td></tr>
+<tr><td><button class="go" data-tab="review">③ 欄位校正</button></td><td>左側選欄位（例如「姓名」），右側列出每一份的裁切圖和辨識值。Enter 確認並跳下一筆；勾選欄位可以直接點框，或按數字鍵切換；點頁碼可以看整頁。</td></tr>
+</table>
+
+<h2>30 份模擬資料的結果</h2>
+<table>
+<tr><th>方法</th><th class="n">欄位正確率</th></tr>
+<tr><td>整頁 OCR + 文字規則（不用模板）</td><td class="n">約 40–50%</td></tr>
+<tr><td>模板 + 對齊 + 欄位裁切 OCR + 正規化</td><td class="n"><b>68.6%</b></td></tr>
+</table>
+<ul>
+  <li>勾選框：檢傷 100%、性別 97%、過敏 97%、診斷 87%。</li>
+  <li>手寫數字和人名最難，大約 37–57%，所以需要人工校正。</li>
+  <li><b>旗標是重點</b>：95% 的錯誤值都會被旗標或低信心值抓出來，沒有旗標的值有 96% 是對的。校正時可以優先看有旗標的項目，沒有旗標的一鍵確認。</li>
+</ul>
+
+<h2>設計重點</h2>
+<ul>
+  <li><b>只有 OCR 需要 GPU</b>：對齊、勾選判斷、驗證和匯出都在 CPU 上跑；模板編輯和校正是純前端，不需要伺服器。</li>
+  <li><b>先對齊再裁切</b>：用模板的固定位置抓欄位，比在整頁文字裡猜哪段是哪個欄位穩定得多。</li>
+  <li><b>兩版 OCR 互相比對</b>：每個欄位都送「去掉印刷字」和「原圖」兩版，結果不一致就標旗。</li>
+</ul>
+
+<p class="note">所有資料都是合成的模擬資料，不含真實個資。這個展示頁不會連線到任何 OCR 服務，所有資料都已經內嵌在檔案裡；你做的校正只會存在你自己的瀏覽器中。</p>
+</main>
+<script>
+document.querySelectorAll('button.go').forEach(b => b.onclick = () => parent.postMessage({tab: b.dataset.tab}, '*'));
+</script>

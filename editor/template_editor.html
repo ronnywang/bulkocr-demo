@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<title>表單模板編輯器</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:13px system-ui,-apple-system,"PingFang TC",sans-serif;display:flex;height:100vh;color:#222}
+#side{width:380px;display:flex;flex-direction:column;border-right:1px solid #ccc;background:#fafafa}
+#top{padding:8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#top label.file{border:1px solid #888;border-radius:4px;padding:2px 6px;cursor:pointer;background:#fff}
+#top input[type=file]{display:none}
+#fields{flex:1;overflow:auto}
+.f{padding:4px 8px;border-bottom:1px solid #eee;cursor:pointer;display:flex;gap:6px;align-items:center}
+.f:hover{background:#eef}.f.sel{background:#dde6ff}
+.f .t{color:#888;font-size:11px;margin-left:auto}
+.f .ok{color:#0a0;font-weight:bold;width:1em}
+#props{border-top:2px solid #99a;padding:8px;max-height:52vh;overflow:auto;background:#fff}
+#props .row{display:flex;gap:6px;margin:3px 0;align-items:center}
+#props .row>span{width:64px;color:#555;flex:none}
+#props input[type=text],#props select,#props textarea{flex:1;font:inherit;padding:2px 4px}
+#props textarea{height:44px;font-family:ui-monospace,monospace;font-size:12px}
+table.opts{width:100%;border-collapse:collapse;margin-top:4px}
+table.opts td{border-bottom:1px solid #eee;padding:1px 2px}
+table.opts input{width:100%;font:inherit}
+table.opts tr.sel{background:#ffe9a8}
+button{font:inherit;cursor:pointer}
+#main{flex:1;overflow:auto;position:relative;background:#888}
+#stage{position:relative;transform-origin:0 0;margin:10px}
+#stage img{display:block;user-select:none;-webkit-user-drag:none}
+#sample{position:absolute;left:0;top:0;pointer-events:none}
+.b{position:absolute;border:2px solid;cursor:move}
+.b.field{border-color:#1f5fff;background:rgba(31,95,255,.06)}
+.b.opt{border-color:#e00;background:rgba(255,0,0,.05)}
+.b.other{border-color:#0a0;background:rgba(0,160,0,.06)}
+.b.dim{opacity:.6}
+.b.sel{outline:3px solid #ffb300;z-index:5}
+.b .lab{position:absolute;left:0;top:-15px;font-size:11px;white-space:nowrap;background:rgba(255,255,255,.85);padding:0 2px;pointer-events:none;color:#000}
+.b .h{position:absolute;width:12px;height:12px;right:-7px;bottom:-7px;background:#ffb300;border:1px solid #333;cursor:nwse-resize;display:none}
+.b.sel .h{display:block}
+#drawhint{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:6px 12px;border-radius:6px;display:none;z-index:9}
+#help{color:#666;font-size:11px;padding:4px 8px;border-top:1px solid #ddd}
+.prog{margin-left:auto;font-weight:bold}
+</style>
+<div id="side">
+  <div id="top">
+    <label class="file">開啟模板 JSON<input type="file" id="fJson" accept=".json"></label>
+    <label class="file">底圖<input type="file" id="fImg" accept="image/*"></label>
+    <label class="file">疊樣本頁<input type="file" id="fSample" accept="image/*"></label>
+    <label>透明度 <input type="range" id="sampleOp" min="0" max="1" step="0.05" value="0.6" style="width:60px"></label>
+    <label>縮放 <input type="range" id="zoom" min="0.3" max="1.5" step="0.05" value="0.6" style="width:70px"></label>
+    <label><input type="checkbox" id="onlySel">只顯示選取欄位</label>
+    <button id="btnAdd">＋欄位</button>
+    <button id="btnSave">匯出 JSON</button>
+    <span class="prog" id="prog"></span>
+  </div>
+  <div id="fields"></div>
+  <div id="props"><i>選一個欄位來編輯</i></div>
+  <div id="help">拖拉框移動，右下角調整大小；方向鍵微調 1px（Shift 10px）；Delete 刪除選取的選項框；Enter 標記已確認並跳下一個。自動存到瀏覽器 localStorage。</div>
+</div>
+<div id="main"><div id="stage"><img id="bg"><img id="sample"></div></div>
+<div id="drawhint">在圖上拖拉畫出框（Esc 取消）</div>
+<script>
+const TYPES = ["text","number","date","paragraph","checkbox_single","checkbox_multi","signature","drawing"];
+let T = null, selF = -1, selPart = null, zoom = 0.6, drawCb = null;
+const $ = id => document.getElementById(id);
+const stage = $('stage'), bg = $('bg'), sample = $('sample');
+
+function otherList(f){ return f.other_text ? (Array.isArray(f.other_text) ? f.other_text : [f.other_text]) : []; }
+function setOtherList(f, arr){ if(!arr.length) delete f.other_text; else f.other_text = arr.length===1 ? arr[0] : arr; }
+function save(){ if(T) localStorage.setItem('tpl:'+T.form_id, JSON.stringify(T)); }
+function partBox(f, p){
+  if(!p || p.kind==='field') return f.bbox;
+  if(p.kind==='opt') return f.options[p.i].bbox;
+  if(p.kind==='other') return otherList(f)[p.i].bbox;
+}
+
+// ---------- loading ----------
+function loadTemplate(obj){
+  const cached = localStorage.getItem('tpl:'+obj.form_id);
+  if(cached && confirm('瀏覽器裡有這個模板未匯出的編輯紀錄，要載入它嗎？（取消＝用檔案版本）')) obj = JSON.parse(cached);
+  T = obj; selF = -1; selPart = null; renderAll();
+}
+$('fJson').onchange = e => { const r = new FileReader(); r.onload = () => loadTemplate(JSON.parse(r.result)); r.readAsText(e.target.files[0]); };
+$('fImg').onchange = e => { bg.src = URL.createObjectURL(e.target.files[0]); };
+$('fSample').onchange = e => { sample.src = URL.createObjectURL(e.target.files[0]); };
+$('sampleOp').oninput = e => sample.style.opacity = e.target.value;
+sample.style.opacity = 0.6;
+$('zoom').oninput = e => { zoom = +e.target.value; applyZoom(); };
+$('onlySel').onchange = renderBoxes;
+bg.onload = applyZoom;
+function applyZoom(){ stage.style.transform = `scale(${zoom})`; stage.style.width = (bg.naturalWidth||1646)+'px'; stage.style.height=(bg.naturalHeight||2331)+'px'; }
+// try default paths when served over http (python3 -m http.server)
+if(location.protocol.startsWith('http')){
+  const q = new URLSearchParams(location.search);
+  const tp = q.get('template') || '../templates/medical_record_1_2.json';
+  fetch(tp).then(r=>r.json()).then(j=>{ loadTemplate(j); bg.src = tp.replace(/[^/]*$/, '') + (j.form_id + '.blank.png'); }).catch(()=>{});
+}
+
+// ---------- rendering ----------
+function renderAll(){ renderList(); renderProps(); renderBoxes(); }
+function renderList(){
+  const el = $('fields'); el.innerHTML = '';
+  T.fields.forEach((f,i)=>{
+    const d = document.createElement('div'); d.className = 'f' + (i===selF?' sel':'');
+    d.innerHTML = `<span class="ok">${f.reviewed?'✓':''}</span><b>${esc(f.label||f.id)}</b><span class="t">${f.type}${f.options?' ×'+f.options.length:''}</span>`;
+    d.onclick = () => select(i, {kind: f.bbox ? 'field' : (f.options ? 'opt' : 'field'), i:0});
+    el.appendChild(d);
+  });
+  const n = T.fields.filter(f=>f.reviewed).length;
+  $('prog').textContent = `已確認 ${n}/${T.fields.length}`;
+}
+function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function renderBoxes(){
+  stage.querySelectorAll('.b').forEach(e=>e.remove());
+  if(!T) return;
+  const only = $('onlySel').checked;
+  T.fields.forEach((f,fi)=>{
+    if(only && fi!==selF) return;
+    const dim = selF>=0 && fi!==selF;
+    const add = (bbox, kind, i, text) => {
+      if(!bbox) return;
+      const b = document.createElement('div');
+      b.className = `b ${kind}` + (dim?' dim':'') + (fi===selF && selPart && selPart.kind===kind && selPart.i===i ? ' sel':'');
+      place(b, bbox);
+      b.innerHTML = `<span class="lab">${esc(text)}</span><span class="h"></span>`;
+      b.onmousedown = ev => startDrag(ev, fi, {kind, i}, ev.target.classList.contains('h'));
+      stage.appendChild(b);
+    };
+    add(f.bbox, 'field', 0, f.label||f.id);
+    (f.options||[]).forEach((o,i)=>add(o.bbox,'opt',i, fi===selF ? o.label : ''));
+    otherList(f).forEach((o,i)=>add(o.bbox,'other',i, fi===selF ? '其他文字('+o.option+')' : ''));
+  });
+}
+function place(el, b){ el.style.left=b[0]+'px'; el.style.top=b[1]+'px'; el.style.width=(b[2]-b[0])+'px'; el.style.height=(b[3]-b[1])+'px'; }
+
+function renderProps(){
+  const P = $('props');
+  if(selF<0){ P.innerHTML = '<i>選一個欄位來編輯</i>'; return; }
+  const f = T.fields[selF];
+  const isCb = f.type.startsWith('checkbox');
+  P.innerHTML = `
+   <div class="row"><span>id</span><input type="text" data-k="id" value="${esc(f.id)}"></div>
+   <div class="row"><span>名稱</span><input type="text" data-k="label" value="${esc(f.label)}"></div>
+   <div class="row"><span>類型</span><select data-k="type">${TYPES.map(t=>`<option ${t===f.type?'selected':''}>${t}</option>`).join('')}</select>
+     <label><input type="checkbox" data-k="required" ${f.required?'checked':''}>必填</label></div>
+   <div class="row"><span>驗證</span><textarea data-k="validate" placeholder='{"pattern":"^\\\\d+$","min":0,"max":100}'>${f.validate?esc(JSON.stringify(f.validate)):''}</textarea></div>
+   <div class="row"><span>字典</span><input type="text" data-k="dictionary" placeholder="以逗號分隔，用來校正 OCR" value="${esc((f.dictionary||[]).join(','))}"></div>
+   <div class="row"><span>欄位框</span>${f.bbox?`<code>${f.bbox.join(', ')}</code> <button id="bRedraw">重畫</button> <button id="bDelBox">移除</button>`:'<button id="bDraw">畫欄位框</button>'}</div>
+   ${isCb?`<div><b>選項</b> <button id="bAddOpt">＋選項（畫框）</button>
+     <table class="opts">${(f.options||[]).map((o,i)=>`<tr class="${selPart&&selPart.kind==='opt'&&selPart.i===i?'sel':''}" data-i="${i}">
+       <td style="width:60px"><input data-o="value" value="${esc(o.value)}"></td><td><input data-o="label" value="${esc(o.label)}"></td>
+       <td style="width:22px"><button data-del="${i}">✕</button></td></tr>`).join('')}</table></div>`:''}
+   <div style="margin-top:4px"><b>勾選後補充文字</b> <button id="bAddOther">＋（畫框）</button>
+     ${otherList(f).map((o,i)=>`<div class="row"><span>對應選項</span><input type="text" data-ot="${i}" value="${esc(o.option)}"><button data-otdel="${i}">✕</button></div>`).join('')}</div>
+   <div class="row" style="margin-top:8px"><label><input type="checkbox" id="bReviewed" ${f.reviewed?'checked':''}> <b>此欄位已確認無誤</b></label>
+     <button id="bDelField" style="margin-left:auto;color:#c00">刪除欄位</button></div>`;
+  P.querySelectorAll('[data-k]').forEach(inp => inp.onchange = () => {
+    const k = inp.dataset.k;
+    if(k==='required') f.required = inp.checked || undefined;
+    else if(k==='validate'){ try{ f.validate = inp.value.trim()? JSON.parse(inp.value) : undefined; inp.style.background=''; }catch(e){ inp.style.background='#fcc'; return; } }
+    else if(k==='dictionary') f.dictionary = inp.value.trim() ? inp.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean) : undefined;
+    else f[k] = inp.value;
+    if(k==='type' && f.type.startsWith('checkbox') && !f.options) f.options = [];
+    save(); renderAll();
+  });
+  P.querySelectorAll('tr[data-i]').forEach(tr => {
+    const i = +tr.dataset.i;
+    tr.onclick = ev => { if(ev.target.tagName!=='INPUT' && ev.target.tagName!=='BUTTON'){ selPart={kind:'opt',i}; renderProps(); renderBoxes(); } };
+    tr.querySelectorAll('[data-o]').forEach(inp => inp.onchange = () => { f.options[i][inp.dataset.o] = inp.value; save(); renderBoxes(); });
+  });
+  P.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { f.options.splice(+b.dataset.del,1); selPart=null; save(); renderAll(); });
+  P.querySelectorAll('[data-ot]').forEach(inp => inp.onchange = () => { const l=otherList(f); l[+inp.dataset.ot].option = inp.value; setOtherList(f,l); save(); });
+  P.querySelectorAll('[data-otdel]').forEach(b => b.onclick = () => { const l=otherList(f); l.splice(+b.dataset.otdel,1); setOtherList(f,l); selPart=null; save(); renderAll(); });
+  const on = (id, fn) => { const e=$(id); if(e) e.onclick = fn; };
+  on('bDraw', () => draw(b => { f.bbox = b; selPart={kind:'field',i:0}; }));
+  on('bRedraw', () => draw(b => { f.bbox = b; selPart={kind:'field',i:0}; }));
+  on('bDelBox', () => { delete f.bbox; save(); renderAll(); });
+  on('bAddOpt', () => draw(b => { const n=(f.options||[]).length+1; (f.options=f.options||[]).push({value:String(n),label:'選項'+n,bbox:b}); selPart={kind:'opt',i:f.options.length-1}; }));
+  on('bAddOther', () => draw(b => { const l=otherList(f); l.push({option: (f.options&&f.options.length? f.options[f.options.length-1].value : ''), bbox:b}); setOtherList(f,l); selPart={kind:'other',i:l.length-1}; }));
+  on('bDelField', () => { if(confirm('刪除欄位 '+f.label+'？')){ T.fields.splice(selF,1); selF=-1; selPart=null; save(); renderAll(); } });
+  $('bReviewed').onchange = e => { f.reviewed = e.target.checked || undefined; save(); renderList(); };
+}
+
+function select(fi, part){
+  selF = fi; selPart = part; renderAll();
+  const b = partBox(T.fields[fi], part) || T.fields[fi].bbox || (T.fields[fi].options||[{}])[0].bbox;
+  if(b){ const m=$('main'); m.scrollTo({left: b[0]*zoom - m.clientWidth/2, top: b[1]*zoom - m.clientHeight/3, behavior:'smooth'}); }
+}
+
+// ---------- mouse ----------
+function imgPt(ev){ const r = stage.getBoundingClientRect(); return [ (ev.clientX - r.left)/zoom, (ev.clientY - r.top)/zoom ]; }
+function startDrag(ev, fi, part, resize){
+  if(drawCb) return;
+  ev.preventDefault(); ev.stopPropagation();
+  if(fi!==selF || !selPart || selPart.kind!==part.kind || selPart.i!==part.i){ selF=fi; selPart=part; renderAll(); }
+  const f = T.fields[fi], b = partBox(f, part), start = imgPt(ev), orig = b.slice();
+  const move = e => {
+    const p = imgPt(e), dx = Math.round(p[0]-start[0]), dy = Math.round(p[1]-start[1]);
+    if(resize){ b[2] = Math.max(orig[0]+4, orig[2]+dx); b[3] = Math.max(orig[1]+4, orig[3]+dy); }
+    else { b[0]=orig[0]+dx; b[1]=orig[1]+dy; b[2]=orig[2]+dx; b[3]=orig[3]+dy; }
+    const el = stage.querySelector('.b.sel'); if(el) place(el, b);
+  };
+  const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); save(); renderProps(); };
+  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+}
+function draw(cb){ drawCb = cb; $('drawhint').style.display='block'; stage.style.cursor='crosshair'; }
+function endDraw(){ drawCb = null; $('drawhint').style.display='none'; stage.style.cursor=''; }
+stage.addEventListener('mousedown', ev => {
+  if(!drawCb) return;
+  ev.preventDefault();
+  const s = imgPt(ev); const tmp = document.createElement('div'); tmp.className='b sel'; stage.appendChild(tmp);
+  const move = e => { const p = imgPt(e); place(tmp, [Math.min(s[0],p[0]),Math.min(s[1],p[1]),Math.max(s[0],p[0]),Math.max(s[1],p[1])]); };
+  const up = e => {
+    document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); tmp.remove();
+    const p = imgPt(e); const b = [Math.min(s[0],p[0]),Math.min(s[1],p[1]),Math.max(s[0],p[0]),Math.max(s[1],p[1])].map(Math.round);
+    const cb = drawCb; endDraw();
+    if(b[2]-b[0] > 4 && b[3]-b[1] > 4){ cb(b); save(); renderAll(); }
+  };
+  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+});
+
+// ---------- keyboard ----------
+document.addEventListener('keydown', ev => {
+  if(ev.key==='Escape' && drawCb){ endDraw(); return; }
+  if(['INPUT','TEXTAREA','SELECT'].includes(ev.target.tagName) || selF<0) return;
+  const f = T.fields[selF];
+  if(ev.key==='Enter'){ f.reviewed = true; save(); if(selF < T.fields.length-1) select(selF+1, {kind: T.fields[selF+1].bbox?'field':'opt', i:0}); else renderAll(); ev.preventDefault(); return; }
+  const b = partBox(f, selPart); if(!b) return;
+  const step = ev.shiftKey ? 10 : 1;
+  const d = {ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]}[ev.key];
+  if(d){ ev.preventDefault();
+    if(ev.altKey){ b[2]+=d[0]; b[3]+=d[1]; } else { b[0]+=d[0]; b[2]+=d[0]; b[1]+=d[1]; b[3]+=d[1]; }
+    save(); renderBoxes(); renderProps(); return; }
+  if((ev.key==='Delete'||ev.key==='Backspace') && selPart && selPart.kind==='opt'){ f.options.splice(selPart.i,1); selPart=null; save(); renderAll(); }
+});
+
+$('btnAdd').onclick = () => {
+  if(!T) return alert('先開啟模板 JSON');
+  const id = prompt('新欄位 id（英數）'); if(!id) return;
+  T.fields.push({id, label:id, type:'text'}); select(T.fields.length-1, {kind:'field',i:0}); save();
+  draw(b => { T.fields[selF].bbox = b; });
+};
+$('btnSave').onclick = () => {
+  if(!T) return;
+  T.status = T.fields.every(f=>f.reviewed) ? 'reviewed' : 'draft';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(T, null, 1)], {type:'application/json'}));
+  a.download = (T.form_id||'template') + '.json'; a.click();
+};
+</script>
+</html>
